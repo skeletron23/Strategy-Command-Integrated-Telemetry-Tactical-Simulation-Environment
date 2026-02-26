@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: f1-redis-bus
+    ports:
+      - "6379:6379"
+    # We disable disk saves (--save "") because 60Hz telemetry will shred your disk I/O.
+    # This keeps Redis strictly in-memory for maximum speed.
+    command: redis-server --save "" --appendonly no
+    networks:
+      - scittse-network
+
+networks:
+  scittse-network:
+    driver: bridge
