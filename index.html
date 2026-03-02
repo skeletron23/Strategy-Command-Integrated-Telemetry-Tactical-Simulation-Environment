@@ -9,31 +9,41 @@
             color: #00ff00; 
             font-family: 'Courier New', Courier, monospace; 
             padding: 40px; 
+            display: flex;
+            gap: 40px;
         }
-        .dashboard { 
+        .panel { 
             border: 2px solid #00ff00; 
             padding: 20px; 
-            width: 350px; 
             border-radius: 10px;
             background-color: #161b22;
         }
-        h1 { color: #ffffff; font-size: 24px; }
+        .dashboard { width: 350px; }
+        .map-container { display: flex; flex-direction: column; align-items: center;}
+        h1 { color: #ffffff; font-size: 24px; margin-top: 0;}
         .metric { font-size: 18px; margin: 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px;}
         .metric:last-child { border-bottom: none; }
         .value { color: #ffffff; font-weight: bold; float: right; }
         #status { margin-bottom: 20px; font-weight: bold; }
-        .highlight { color: #ffeb3b; } /* Yellow for Lap/Turn */
+        .highlight { color: #ffeb3b; }
+        
+        /* The new Mini-Map Canvas */
+        canvas {
+            background-color: #000000;
+            border: 1px solid #333;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
 
-    <h1>S.C.I.T.T.S.E. Dashboard</h1>
-    <div id="status">Status: WAITING FOR LINK 🟡</div>
+    <div class="panel dashboard">
+        <h1>S.C.I.T.T.S.E. Core</h1>
+        <div id="status">Status: WAITING FOR LINK 🟡</div>
 
-    <div class="dashboard">
         <div class="metric">Lap: <span class="value highlight" id="lap">0</span></div>
         <div class="metric">Location: <span class="value highlight" id="turn">Straight</span></div>
-        
         <div class="metric">Speed: <span class="value" id="speed">0 km/h</span></div>
         <div class="metric">RPM: <span class="value" id="rpm">0</span></div>
         <div class="metric">Gear: <span class="value" id="gear">0</span></div>
@@ -41,8 +51,27 @@
         <div class="metric">Brake: <span class="value" id="brake">0 %</span></div>
     </div>
 
+    <div class="panel map-container">
+        <h1 style="color: #00ff00;">Live Track Map</h1>
+        <canvas id="trackMap" width="400" height="400"></canvas>
+    </div>
+
     <script>
         window.onload = function() {
+            // --- Map Setup ---
+            const canvas = document.getElementById("trackMap");
+            const ctx = canvas.getContext("2d");
+            
+            // We keep a history of the last 300 coordinates to draw a tail
+            const pathHistory = []; 
+            const MAX_TAIL_LENGTH = 300; 
+            
+            // Map Translation Settings
+            const MAP_SCALE = 25; // Divides F1 coordinates to fit the 400px box
+            const CENTER_X = canvas.width / 2;
+            const CENTER_Y = canvas.height / 2;
+
+            // --- WebSocket Setup ---
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
             
             ws.onopen = function() {
@@ -51,30 +80,65 @@
                 statusDiv.style.color = "#00ff00";
             };
 
-            ws.onmessage = function(event) {
+           ws.onmessage = function(event) {
                 const telemetry = JSON.parse(event.data);
                 
-                // Map the new data
+                // 1. Update Text Dashboard
                 document.getElementById("lap").innerText = telemetry.lap;
-                
-                if (telemetry.turn === "Straight") {
-                    document.getElementById("turn").innerText = "Straight";
-                } else {
-                    document.getElementById("turn").innerText = "Turn " + telemetry.turn;
-                }
-
-                // Map the original data
+                document.getElementById("turn").innerText = telemetry.turn === "Straight" ? "Straight" : "Turn " + telemetry.turn;
                 document.getElementById("speed").innerText = telemetry.speed + " km/h";
                 document.getElementById("rpm").innerText = telemetry.rpm;
                 document.getElementById("gear").innerText = telemetry.gear;
                 document.getElementById("throttle").innerText = telemetry.throttle + " %";
                 document.getElementById("brake").innerText = telemetry.brake + " %";
+
+                // 2. Map Translation (Normalized 0.0-1.0 to Canvas Pixels)
+                const PADDING = 20; // Keeps the car from scraping the exact edge of the box
+                const DRAW_SIZE = canvas.width - (PADDING * 2);
+
+                // Multiply the percentage by the drawing size
+                // We invert Y (1.0 - y) because F1 North goes up, but Canvas Y draws downwards
+                const screenX = PADDING + (telemetry.x * DRAW_SIZE);
+                const screenY = PADDING + ((1.0 - telemetry.y) * DRAW_SIZE);
+
+                // Add to our queue
+                pathHistory.push({ x: screenX, y: screenY });
+                if (pathHistory.length > MAX_TAIL_LENGTH) {
+                    pathHistory.shift(); 
+                }
+
+                // 3. Render the Frame
+                drawMap();
             };
 
+            function drawMap() {
+                // Clear the previous frame
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (pathHistory.length === 0) return;
+
+                // Draw the fading tail (The Racing Line)
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"; // Semi-transparent white
+                ctx.lineWidth = 2;
+                ctx.moveTo(pathHistory[0].x, pathHistory[0].y);
+                
+                for (let i = 1; i < pathHistory.length; i++) {
+                    ctx.lineTo(pathHistory[i].x, pathHistory[i].y);
+                }
+                ctx.stroke();
+
+                // Draw the Car (A bright red dot at the newest coordinate)
+                const currentPos = pathHistory[pathHistory.length - 1];
+                ctx.beginPath();
+                ctx.arc(currentPos.x, currentPos.y, 5, 0, Math.PI * 2);
+                ctx.fillStyle = "#ff0000";
+                ctx.fill();
+            }
+
             ws.onclose = function() {
-                const statusDiv = document.getElementById("status");
-                statusDiv.innerHTML = "Status: LINK LOST 🔴";
-                statusDiv.style.color = "#ff0000";
+                document.getElementById("status").innerHTML = "Status: LINK LOST 🔴";
+                document.getElementById("status").style.color = "#ff0000";
             };
         };
     </script>
