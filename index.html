@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>S.C.I.T.T.S.E. Telemetry Link</title>
+    <style>
+        body { 
+            background-color: #0d1117; 
+            color: #00ff00; 
+            font-family: 'Courier New', Courier, monospace; 
+            padding: 40px; 
+        }
+        .dashboard { 
+            border: 2px solid #00ff00; 
+            padding: 20px; 
+            width: 350px; 
+            border-radius: 10px;
+            background-color: #161b22;
+        }
+        h1 { color: #ffffff; font-size: 24px; }
+        .metric { font-size: 18px; margin: 10px 0; }
+        .value { color: #ffffff; font-weight: bold; float: right; }
+        #status { margin-bottom: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Stratergy & Command Integrated Telemetry & Track Simulation Environment Dashboard</h1>
+    <div id="status">Status: WAITING FOR LINK 🟡</div>
+
+    <div class="dashboard">
+        <div class="metric">Speed: <span class="value" id="speed">0 km/h</span></div>
+        <div class="metric">RPM: <span class="value" id="rpm">0</span></div>
+        <div class="metric">Gear: <span class="value" id="gear">0</span></div>
+        <div class="metric">Throttle: <span class="value" id="throttle">0 %</span></div>
+        <div class="metric">Brake: <span class="value" id="brake">0 %</span></div>
+    </div>
+
+    <script>
+        // Wait for the HTML to fully load before running the connection logic
+        window.onload = function() {
+            const ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
+            
+            ws.onopen = function() {
+                const statusDiv = document.getElementById("status");
+                statusDiv.innerHTML = "Status: LINK ESTABLISHED 🟢";
+                statusDiv.style.color = "#00ff00";
+            };
+
+            ws.onmessage = function(event) {
+                const telemetry = JSON.parse(event.data);
+                
+                document.getElementById("speed").innerText = telemetry.speed + " km/h";
+                document.getElementById("rpm").innerText = telemetry.rpm;
+                document.getElementById("gear").innerText = telemetry.gear;
+                document.getElementById("throttle").innerText = telemetry.throttle + " %";
+                document.getElementById("brake").innerText = telemetry.brake + " %";
+            };
+
+            ws.onclose = function() {
+                const statusDiv = document.getElementById("status");
+                statusDiv.innerHTML = "Status: LINK LOST 🔴";
+                statusDiv.style.color = "#ff0000";
+            };
+        };
+    </script>
+</body>
+</html>
