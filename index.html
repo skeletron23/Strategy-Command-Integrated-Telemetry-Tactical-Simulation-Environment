@@ -18,17 +18,22 @@
             background-color: #161b22;
         }
         h1 { color: #ffffff; font-size: 24px; }
-        .metric { font-size: 18px; margin: 10px 0; }
+        .metric { font-size: 18px; margin: 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px;}
+        .metric:last-child { border-bottom: none; }
         .value { color: #ffffff; font-weight: bold; float: right; }
         #status { margin-bottom: 20px; font-weight: bold; }
+        .highlight { color: #ffeb3b; } /* Yellow for Lap/Turn */
     </style>
 </head>
 <body>
 
-    <h1>Stratergy & Command Integrated Telemetry & Track Simulation Environment Dashboard</h1>
+    <h1>S.C.I.T.T.S.E. Dashboard</h1>
     <div id="status">Status: WAITING FOR LINK 🟡</div>
 
     <div class="dashboard">
+        <div class="metric">Lap: <span class="value highlight" id="lap">0</span></div>
+        <div class="metric">Location: <span class="value highlight" id="turn">Straight</span></div>
+        
         <div class="metric">Speed: <span class="value" id="speed">0 km/h</span></div>
         <div class="metric">RPM: <span class="value" id="rpm">0</span></div>
         <div class="metric">Gear: <span class="value" id="gear">0</span></div>
@@ -37,7 +42,6 @@
     </div>
 
     <script>
-        // Wait for the HTML to fully load before running the connection logic
         window.onload = function() {
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
             
@@ -50,6 +54,16 @@
             ws.onmessage = function(event) {
                 const telemetry = JSON.parse(event.data);
                 
+                // Map the new data
+                document.getElementById("lap").innerText = telemetry.lap;
+                
+                if (telemetry.turn === "Straight") {
+                    document.getElementById("turn").innerText = "Straight";
+                } else {
+                    document.getElementById("turn").innerText = "Turn " + telemetry.turn;
+                }
+
+                // Map the original data
                 document.getElementById("speed").innerText = telemetry.speed + " km/h";
                 document.getElementById("rpm").innerText = telemetry.rpm;
                 document.getElementById("gear").innerText = telemetry.gear;
