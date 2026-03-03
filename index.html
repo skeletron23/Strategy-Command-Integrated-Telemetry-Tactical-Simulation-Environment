@@ -2,44 +2,50 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>S.C.I.T.T.S.E. Telemetry Link</title>
+    <title>S.C.I.T.T.S.E. Command Center</title>
     <style>
+        /* Full Screen Reset */
         body { 
-            background-color: #0d1117; 
-            color: #00ff00; 
+            margin: 0; padding: 0; height: 100vh;
+            background-color: #0d1117; color: #00ff00; 
             font-family: 'Courier New', Courier, monospace; 
-            padding: 40px; 
-            display: flex;
-            gap: 40px;
+            display: flex; overflow: hidden;
         }
-        .panel { 
-            border: 2px solid #00ff00; 
-            padding: 20px; 
-            border-radius: 10px;
-            background-color: #161b22;
-        }
-        .dashboard { width: 350px; }
-        .map-container { display: flex; flex-direction: column; align-items: center;}
-        h1 { color: #ffffff; font-size: 24px; margin-top: 0;}
-        .metric { font-size: 18px; margin: 10px 0; border-bottom: 1px solid #333; padding-bottom: 5px;}
-        .metric:last-child { border-bottom: none; }
-        .value { color: #ffffff; font-weight: bold; float: right; }
-        #status { margin-bottom: 20px; font-weight: bold; }
-        .highlight { color: #ffeb3b; }
         
-        /* The new Mini-Map Canvas */
+        /* Left 30% - Data Dashboard */
+        .sidebar { 
+            width: 350px; min-width: 350px; 
+            background-color: #161b22; 
+            border-right: 2px solid #00ff00; 
+            padding: 30px; display: flex; flex-direction: column;
+            box-shadow: 5px 0 15px rgba(0,0,0,0.5); z-index: 10;
+        }
+        
+        /* Right 70% - Massive Track Map */
+        .map-area { 
+            flex-grow: 1; position: relative;
+            display: flex; justify-content: center; align-items: center;
+            padding: 20px; background-color: #090c10;
+        }
+        
         canvas {
             background-color: #000000;
             border: 1px solid #333;
-            border-radius: 5px;
-            margin-top: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.05);
         }
+
+        h1 { color: #ffffff; font-size: 24px; margin-top: 0; border-bottom: 1px solid #00ff00; padding-bottom: 10px;}
+        .metric { font-size: 18px; margin: 15px 0; border-bottom: 1px solid #333; padding-bottom: 5px;}
+        .value { color: #ffffff; font-weight: bold; float: right; }
+        #status { margin-bottom: 30px; font-weight: bold; font-size: 14px;}
+        .highlight { color: #ffeb3b; }
     </style>
 </head>
 <body>
 
-    <div class="panel dashboard">
-        <h1>S.C.I.T.T.S.E. Core</h1>
+    <div class="sidebar">
+        <h1>S.C.I.T.T.S.E.</h1>
         <div id="status">Status: WAITING FOR LINK 🟡</div>
 
         <div class="metric">Lap: <span class="value highlight" id="lap">0</span></div>
@@ -51,36 +57,38 @@
         <div class="metric">Brake: <span class="value" id="brake">0 %</span></div>
     </div>
 
-    <div class="panel map-container">
-        <h1 style="color: #00ff00;">Live Track Map</h1>
-        <canvas id="trackMap" width="400" height="400"></canvas>
+    <div class="map-area" id="mapContainer">
+        <canvas id="trackMap"></canvas>
     </div>
 
     <script>
         window.onload = function() {
-            // --- Map Setup ---
             const canvas = document.getElementById("trackMap");
             const ctx = canvas.getContext("2d");
+            const container = document.getElementById("mapContainer");
             
-            // We keep a history of the last 300 coordinates to draw a tail
-            const pathHistory = []; 
-            const MAX_TAIL_LENGTH = 300; 
-            
-            // Map Translation Settings
-            const MAP_SCALE = 25; // Divides F1 coordinates to fit the 400px box
-            const CENTER_X = canvas.width / 2;
-            const CENTER_Y = canvas.height / 2;
+            // --- The "Static" Map Array ---
+            const fullTrackPath = []; // This stores the track layout permanently
+            let currentCarPos = { x: 0, y: 0 };
+
+            // Dynamic Canvas Resizing to fill the right panel
+            function resizeCanvas() {
+                canvas.width = container.clientWidth - 40;
+                canvas.height = container.clientHeight - 40;
+                drawMap(); // Redraw if user resizes the window
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
 
             // --- WebSocket Setup ---
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
             
             ws.onopen = function() {
-                const statusDiv = document.getElementById("status");
-                statusDiv.innerHTML = "Status: LINK ESTABLISHED 🟢";
-                statusDiv.style.color = "#00ff00";
+                document.getElementById("status").innerHTML = "Status: LINK ESTABLISHED 🟢";
+                document.getElementById("status").style.color = "#00ff00";
             };
 
-           ws.onmessage = function(event) {
+            ws.onmessage = function(event) {
                 const telemetry = JSON.parse(event.data);
                 
                 // 1. Update Text Dashboard
@@ -92,47 +100,58 @@
                 document.getElementById("throttle").innerText = telemetry.throttle + " %";
                 document.getElementById("brake").innerText = telemetry.brake + " %";
 
-                // 2. Map Translation (Normalized 0.0-1.0 to Canvas Pixels)
-                const PADDING = 20; // Keeps the car from scraping the exact edge of the box
-                const DRAW_SIZE = canvas.width - (PADDING * 2);
+                // 2. Aspect Ratio Math (The Bug Fix)
+                const PADDING = 30;
+                const usableWidth = canvas.width - (PADDING * 2);
+                const usableHeight = canvas.height - (PADDING * 2);
+                
+                // Find the smaller dimension to prevent stretching
+                const maxDrawArea = Math.min(usableWidth, usableHeight);
+                
+                // Center the map in the canvas
+                const offsetX = (canvas.width - maxDrawArea) / 2;
+                const offsetY = (canvas.height - maxDrawArea) / 2;
 
-                // Multiply the percentage by the drawing size
-                // We invert Y (1.0 - y) because F1 North goes up, but Canvas Y draws downwards
-                const screenX = PADDING + (telemetry.x * DRAW_SIZE);
-                const screenY = PADDING + ((1.0 - telemetry.y) * DRAW_SIZE);
+                const screenX = offsetX + (telemetry.x * maxDrawArea);
+                const screenY = offsetY + ((1.0 - telemetry.y) * maxDrawArea);
 
-                // Add to our queue
-                pathHistory.push({ x: screenX, y: screenY });
-                if (pathHistory.length > MAX_TAIL_LENGTH) {
-                    pathHistory.shift(); 
-                }
+                currentCarPos = { x: screenX, y: screenY };
 
-                // 3. Render the Frame
+                // Build the static track map (keep up to 10,000 points so it doesn't fade)
+                fullTrackPath.push(currentCarPos);
+                if (fullTrackPath.length > 10000) fullTrackPath.shift();
+
+                // 3. Render
                 drawMap();
             };
 
             function drawMap() {
-                // Clear the previous frame
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (fullTrackPath.length === 0) return;
 
-                if (pathHistory.length === 0) return;
-
-                // Draw the fading tail (The Racing Line)
+                // Draw the Permanent Static Track (Dark Gray)
                 ctx.beginPath();
-                ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"; // Semi-transparent white
-                ctx.lineWidth = 2;
-                ctx.moveTo(pathHistory[0].x, pathHistory[0].y);
+                ctx.strokeStyle = "#333333"; 
+                ctx.lineWidth = 6;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.moveTo(fullTrackPath[0].x, fullTrackPath[0].y);
                 
-                for (let i = 1; i < pathHistory.length; i++) {
-                    ctx.lineTo(pathHistory[i].x, pathHistory[i].y);
+                for (let i = 1; i < fullTrackPath.length; i++) {
+                    ctx.lineTo(fullTrackPath[i].x, fullTrackPath[i].y);
                 }
                 ctx.stroke();
 
-                // Draw the Car (A bright red dot at the newest coordinate)
-                const currentPos = pathHistory[pathHistory.length - 1];
+                // Draw the Car (Bright Red Dot)
                 ctx.beginPath();
-                ctx.arc(currentPos.x, currentPos.y, 5, 0, Math.PI * 2);
+                ctx.arc(currentCarPos.x, currentCarPos.y, 6, 0, Math.PI * 2);
                 ctx.fillStyle = "#ff0000";
+                ctx.fill();
+                
+                // Draw a glow around the car
+                ctx.beginPath();
+                ctx.arc(currentCarPos.x, currentCarPos.y, 12, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
                 ctx.fill();
             }
 
