@@ -73,14 +73,27 @@ def stream_telemetry(year, track, session_type, driver):
         print(f"\n🔴 ERROR: Failed to load data.\nDetails: {e}")
         exit(1)
 
-    print(f"🚀 Blasting 60Hz MsgPack stream to Redis...")
+    print(f"🚀 Blasting MsgPack stream to Redis (synced to real telemetry timestamps)...")
     
     for _, lap in driver_laps.iterrows():
         lap_num = safe_cast(lap['LapNumber'], int, 0)
         telemetry = lap.get_telemetry()
         
+        prev_time = None
         for index, row in telemetry.iterrows():
             start_time = time.time()
+            
+            # --- NEW: Use actual telemetry timestamp delta ---
+            current_time = row['Time'].total_seconds() if hasattr(row['Time'], 'total_seconds') else 0
+            
+            if prev_time is not None:
+                time_delta = current_time - prev_time
+                # Sleep for the actual time delta between telemetry points
+                sleep_time = max(0.001, time_delta)  # Minimum 1ms to avoid busy-waiting
+                time.sleep(sleep_time)
+            
+            prev_time = current_time
+            # -----------------------------------------------
             
             car_distance = safe_cast(row['Distance'], float, 0.0)
             current_turn = get_current_turn(car_distance, corners)
@@ -106,9 +119,6 @@ def stream_telemetry(year, track, session_type, driver):
             
             packed_data = msgpack.packb(payload)
             r.publish('race:telemetry', packed_data)
-            
-            elapsed = time.time() - start_time
-            time.sleep(max(0, (1/60) - elapsed))
 
 if __name__ == "__main__":
     args = parse_arguments()
