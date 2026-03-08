@@ -80,19 +80,33 @@ def stream_telemetry(year, track, session_type, driver):
         telemetry = lap.get_telemetry()
         
         prev_time = None
+        prev_speed = None
+
         for index, row in telemetry.iterrows():
             start_time = time.time()
             
             # --- NEW: Use actual telemetry timestamp delta ---
             current_time = row['Time'].total_seconds() if hasattr(row['Time'], 'total_seconds') else 0
+
+            current_speed_kmh = safe_cast(row['Speed'], float, 0.0)
+            current_speed = current_speed_kmh / 3.6  # Convert km/h to m/s for more accurate timing
             
-            if prev_time is not None:
+            # Calculate longitudinal g-force (acceleration/deceleration)
+            if prev_time is not None and prev_speed is not None:
                 time_delta = current_time - prev_time
-                # Sleep for the actual time delta between telemetry points
-                sleep_time = max(0.001, time_delta)  # Minimum 1ms to avoid busy-waiting
-                time.sleep(sleep_time)
+                if time_delta > 0:
+                    acceleration = (current_speed - prev_speed) / time_delta  # m/s²
+                    long_g = acceleration / 9.81  # Convert to g-force
+                    # Sleep for the actual time delta between telemetry points
+                    sleep_time = max(0.001, time_delta)  # Minimum 1ms to avoid busy-waiting
+                    time.sleep(sleep_time)
+                else:
+                    long_g = 0.0
+            else:
+                long_g = 0.0
             
             prev_time = current_time
+            prev_speed = current_speed
             # -----------------------------------------------
             
             car_distance = safe_cast(row['Distance'], float, 0.0)
@@ -110,7 +124,8 @@ def stream_telemetry(year, track, session_type, driver):
                 "speed": safe_cast(row['Speed'], int, 0),
                 "gear": safe_cast(row['nGear'], int, 0),
                 "throttle": safe_cast(row['Throttle'], int, 0),
-                "brake": safe_cast(row['Brake'], int, 0),
+                "brake": safe_cast(row['Brake'], int, 0)*100,  # Convert to percentage
+                "g_force": round(long_g, 2),
                 "x": norm_x,             # Pushing a percentage instead of meters
                 "y": norm_y,             # Pushing a percentage instead of meters
                 "lap": lap_num,

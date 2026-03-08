@@ -55,6 +55,7 @@
         <div class="metric">Gear: <span class="value" id="gear">0</span></div>
         <div class="metric">Throttle: <span class="value" id="throttle">0 %</span></div>
         <div class="metric">Brake: <span class="value" id="brake">0 %</span></div>
+        <div class="metric">G-Force: <span class="value highlight" id="gforce">0.00 G</span></div>
     </div>
 
     <div class="map-area" id="mapContainer">
@@ -99,6 +100,7 @@
                 document.getElementById("gear").innerText = telemetry.gear;
                 document.getElementById("throttle").innerText = telemetry.throttle + " %";
                 document.getElementById("brake").innerText = telemetry.brake + " %";
+                document.getElementById("gforce").innerText = telemetry.g_force + " G";
 
                 // 2. Aspect Ratio Math (The Bug Fix)
                 const PADDING = 30;
