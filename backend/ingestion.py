@@ -38,7 +38,7 @@ def get_current_turn(car_distance, corners):
 
 def stream_telemetry(year, track, session_type, driver):
     print(f"📡 Initializing Link: {year} {track} [{session_type}] - Driver: {driver}")
-    fastf1.Cache.enable_cache('./')
+    fastf1.Cache.enable_cache('./cache')
     
     try:
         session = fastf1.get_session(year, track, session_type)
