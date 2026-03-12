@@ -56,6 +56,9 @@
         <div class="metric">Throttle: <span class="value" id="throttle">0 %</span></div>
         <div class="metric">Brake: <span class="value" id="brake">0 %</span></div>
         <div class="metric">G-Force: <span class="value highlight" id="gforce">0.00 G</span></div>
+        <div class="metric">Inference: <span class="value" id="infStatus">OFFLINE</span></div>
+        <div class="metric">Next Lap Pred: <span class="value highlight" id="nextLapPred">--</span></div>
+        <div class="metric">Stint Delta: <span class="value highlight" id="stintDelta">--</span></div>
     </div>
 
     <div class="map-area" id="mapContainer">
@@ -83,6 +86,34 @@
 
             // --- WebSocket Setup ---
             const ws = new WebSocket("ws://127.0.0.1:8000/ws/telemetry");
+            const inferenceWs = new WebSocket("ws://127.0.0.1:8001/ws/predict/tire-degradation");
+            let lastInferenceSend = 0;
+            let latestLapForInference = 1;
+
+            inferenceWs.onopen = function() {
+                document.getElementById("infStatus").innerText = "ONLINE";
+                document.getElementById("infStatus").style.color = "#00ff00";
+            };
+
+            inferenceWs.onmessage = function(event) {
+                const result = JSON.parse(event.data);
+                if (!result || !result.projection || result.projection.length === 0) {
+                    return;
+                }
+
+                const nextLap = result.projection[0];
+                const stintDelta = result.summary && typeof result.summary.stint_time_delta_s === "number"
+                    ? result.summary.stint_time_delta_s
+                    : 0;
+
+                document.getElementById("nextLapPred").innerText = nextLap.predicted_lap_time_s.toFixed(3) + " s";
+                document.getElementById("stintDelta").innerText = stintDelta.toFixed(3) + " s";
+            };
+
+            inferenceWs.onclose = function() {
+                document.getElementById("infStatus").innerText = "OFFLINE";
+                document.getElementById("infStatus").style.color = "#ff0000";
+            };
             
             ws.onopen = function() {
                 document.getElementById("status").innerHTML = "Status: LINK ESTABLISHED 🟢";
@@ -91,6 +122,7 @@
 
             ws.onmessage = function(event) {
                 const telemetry = JSON.parse(event.data);
+                latestLapForInference = Math.max(1, telemetry.lap || 1);
                 
                 // 1. Update Text Dashboard
                 document.getElementById("lap").innerText = telemetry.lap;
@@ -125,6 +157,27 @@
 
                 // 3. Render
                 drawMap();
+
+                const now = Date.now();
+                if (inferenceWs.readyState === WebSocket.OPEN && (now - lastInferenceSend) > 1000) {
+                    const inferencePayload = {
+                        tyre_life: latestLapForInference,
+                        compound: "MEDIUM",
+                        lap_number: latestLapForInference,
+                        stint_laps_ahead: 6,
+                        circuit: "Great Britain",
+                        fresh_tyre: 0,
+                        track_temp: 32.0,
+                        air_temp: 24.0,
+                        humidity: 45.0,
+                        pressure: 1013.0,
+                        wind_speed: 3.0,
+                        total_race_laps: 52,
+                        year: 2024
+                    };
+                    inferenceWs.send(JSON.stringify(inferencePayload));
+                    lastInferenceSend = now;
+                }
             };
 
             function drawMap() {

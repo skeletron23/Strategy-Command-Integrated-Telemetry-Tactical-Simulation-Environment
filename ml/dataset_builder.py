@@ -48,8 +48,8 @@ class BuilderConfig:
 
     MIN_STINT_LAPS:     int   = 4
     MAX_STINT_LAPS:     int   = 45   # No F1 tire survives >45 racing laps
-    QUICKLAP_THRESHOLD: float = 1.07 # lower bound: 107% of session fastest
-    UPPER_OUTLIER_S:    float = 5.0  # upper bound: session median + 5s
+    QUICKLAP_THRESHOLD: float = 1.07 # ceiling: 107% of session fastest
+    UPPER_OUTLIER_S:    float = 5.0  # ceiling: session median + 5s
 
     START_FUEL_KG:             float = 110.0
     FUEL_TIME_EFFECT_S_PER_KG: float = 0.033  # Barcelona Constant — midpoint of [0.030, 0.035] Pirelli range
@@ -164,9 +164,9 @@ class TireDegradationBuilder:
         """
         Remove dirty laps: pit in/out, invalid compounds, outlier times.
 
-        The two-sided outlier gate:
-          lower = fastest lap × 1.07 keeps legitimate racing laps
-          upper = session median + 5s catches residual SC/VSC noise
+        Two-sided outlier gate keeps laps in [fastest, min(107%_ceiling, median+5s)]:
+          107%_ceiling = fastest lap × 1.07 — discards excessively slow laps
+          outlier_ceiling = session median + 5s — catches residual SC/VSC noise
         """
         clean = laps.pick_track_status('1')
 
@@ -179,15 +179,17 @@ class TireDegradationBuilder:
 
         session_fastest_s = clean['LapTimeSeconds'].min()
         session_median_s  = clean['LapTimeSeconds'].median()
-        lower_bound = session_fastest_s * self.cfg.QUICKLAP_THRESHOLD
-        upper_bound = session_median_s  + self.cfg.UPPER_OUTLIER_S
+        quicklap_ceiling  = session_fastest_s * self.cfg.QUICKLAP_THRESHOLD
+        outlier_ceiling   = session_median_s  + self.cfg.UPPER_OUTLIER_S
 
-        # P0 FIX: >= lower_bound (keep laps FASTER than 107% cutoff)
-        #         <= upper_bound (discard laps SLOWER than median+5s)
+        # Keep laps within the window:
+        #   >= session_fastest_s — no lap can be faster than the fastest (data sanity)
+        #   <= quicklap_ceiling  — discard laps slower than 107% of fastest
+        #   <= outlier_ceiling   — secondary gate: discard laps slower than median+5s
         clean = clean[
             (clean['LapTimeSeconds'] >= session_fastest_s) &
-            (clean['LapTimeSeconds'] <= lower_bound)       &
-            (clean['LapTimeSeconds'] <= upper_bound)       &
+            (clean['LapTimeSeconds'] <= quicklap_ceiling)  &
+            (clean['LapTimeSeconds'] <= outlier_ceiling)   &
             (clean['LapTimeSeconds'] > MIN_VALID_LAPTIME_S)  &
             (clean['LapTimeSeconds'] < MAX_VALID_LAPTIME_S)
         ]
