@@ -4,6 +4,7 @@ import redis
 import fastf1
 import math
 import argparse
+import os
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="S.C.I.T.T.S.E. Live Telemetry Simulator")
@@ -38,7 +39,10 @@ def get_current_turn(car_distance, corners):
 
 def stream_telemetry(year, track, session_type, driver):
     print(f"📡 Initializing Link: {year} {track} [{session_type}] - Driver: {driver}")
-    fastf1.Cache.enable_cache('./cache')
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    cache_dir = os.path.join(project_root, 'cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    fastf1.Cache.enable_cache(cache_dir)
     
     try:
         session = fastf1.get_session(year, track, session_type)
