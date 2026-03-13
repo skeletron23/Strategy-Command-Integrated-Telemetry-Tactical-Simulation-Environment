@@ -1,0 +1,10 @@
+fastf1
+msgpack
+redis
+fastapi
+pandas
+numpy
+xgboost
+pydantic
+uvicorn
+scikit-learn
