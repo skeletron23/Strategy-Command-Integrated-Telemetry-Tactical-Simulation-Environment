@@ -1,12 +1,12 @@
-import xgboost as xgb
-import pandas as pd
-import numpy as np
+import xgboost as xgb  # type: ignore
+import pandas as pd  # type: ignore
+import numpy as np  # type: ignore
 import logging
 import json
 import argparse
 from pathlib import Path
 from dataclasses import dataclass, field
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score  # type: ignore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -328,14 +328,14 @@ def walk_forward_cv(df: pd.DataFrame, cfg: TrainConfig) -> list[dict]:
 
     Each fold re-encodes circuits from its own training set to prevent leakage.
     """
-    years = sorted(df["Year"].unique())
+    years = sorted(df["Year"].unique().tolist())
     if len(years) < 3:
         log.warning("Need at least 3 seasons for walk-forward CV. Skipping.")
         return []
 
     # Start CV from 3rd year so each fold has ≥2 years of training
-    cv_test_years = [y for y in years[2:]]
-    results = []
+    cv_test_years: list[int] = [y for y in years[2:]]  # type: ignore
+    results: list[dict] = []
 
     log.info(f"\n{'═' * 60}")
     log.info(f"WALK-FORWARD CV | {len(cv_test_years)} folds")
@@ -453,8 +453,8 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
     ordinal_to_compound = {0: "SOFT", 1: "MEDIUM", 2: "HARD"}
     if "CompoundOrdinal" in X_train.columns:
         for ordinal, compound in ordinal_to_compound.items():
-            mask = X_train["CompoundOrdinal"] == ordinal
-            if mask.any():
+            mask: pd.Series = X_train["CompoundOrdinal"] == ordinal
+            if mask.any():  # type: ignore
                 train_compound_means[compound] = float(y_train[mask].mean())
     if train_compound_means:
         compound_mean_preds = test_df["Compound"].map(train_compound_means).fillna(train_mean).values
@@ -469,7 +469,7 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
     log.info("BASELINE COMPARISONS")
     for name, bl in baselines.items():
         log.info(f"  {name:<16} | RMSE: {bl['rmse']:.4f}s | MAE: {bl['mae']:.4f}s | R²: {bl['r2']:.4f}")
-    rmse_lift = baselines["global_mean"]["rmse"] - overall["rmse"]
+    rmse_lift = float(baselines["global_mean"]["rmse"]) - float(overall["rmse"])
     log.info(f"  Model RMSE lift over global mean: {rmse_lift:+.4f}s")
     log.info("OVERALL TEST SET METRICS")
     log.info(f"  RMSE : {overall['rmse']:.4f} s")
@@ -477,11 +477,11 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
     log.info(f"  R²   : {overall['r2']:.4f}")
 
     # Per-compound breakdown
-    per_compound = {}
+    per_compound: dict[str, dict[str, float]] = {}
     log.info("\nPER-COMPOUND METRICS")
     for compound in ["SOFT", "MEDIUM", "HARD"]:
-        mask = test_df["Compound"] == compound
-        if mask.sum() < 10:
+        mask: pd.Series = test_df["Compound"] == compound
+        if mask.sum() < 10:  # type: ignore
             continue
         c_preds  = preds[mask.values]
         c_actual = y_test[mask]
@@ -489,7 +489,7 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
             "rmse":  float(np.sqrt(mean_squared_error(c_actual, c_preds))),
             "mae":   float(mean_absolute_error(c_actual, c_preds)),
             "r2":    float(r2_score(c_actual, c_preds)),
-            "n_laps": int(mask.sum()),
+            "n_laps": float(mask.sum()),  # type: ignore
         }
         log.info(
             f"  {compound:<8} | RMSE: {per_compound[compound]['rmse']:.4f}s "
@@ -499,12 +499,12 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
         )
 
     # Per-era breakdown — validates model generalizes across regulation changes
-    per_era = {}
+    per_era: dict[str, dict[str, float]] = {}
     log.info("\nPER-ERA METRICS")
     if "Era" in test_df.columns:
         for era in test_df["Era"].unique():
-            mask = test_df["Era"] == era
-            if mask.sum() < 10:
+            mask: pd.Series = test_df["Era"] == era
+            if mask.sum() < 10:  # type: ignore
                 continue
             e_preds  = preds[mask.values]
             e_actual = y_test[mask]
@@ -512,7 +512,7 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
                 "rmse":  float(np.sqrt(mean_squared_error(e_actual, e_preds))),
                 "mae":   float(mean_absolute_error(e_actual, e_preds)),
                 "r2":    float(r2_score(e_actual, e_preds)),
-                "n_laps": int(mask.sum()),
+                "n_laps": float(mask.sum()),  # type: ignore
             }
             log.info(
                 f"  {era:<16} | RMSE: {per_era[era]['rmse']:.4f}s "
@@ -521,12 +521,12 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
             )
 
     # Per-circuit breakdown — reveals which tracks the model struggles on
-    per_circuit = {}
+    per_circuit: dict[str, dict[str, float]] = {}
     if "Circuit" in test_df.columns:
         log.info("\nPER-CIRCUIT METRICS (top 5 worst RMSE)")
         for circuit in test_df["Circuit"].unique():
-            mask = test_df["Circuit"] == circuit
-            if mask.sum() < 10:
+            mask: pd.Series = test_df["Circuit"] == circuit
+            if mask.sum() < 10:  # type: ignore
                 continue
             ci_preds  = preds[mask.values]
             ci_actual = y_test[mask]
@@ -534,11 +534,12 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
                 "rmse":  float(np.sqrt(mean_squared_error(ci_actual, ci_preds))),
                 "mae":   float(mean_absolute_error(ci_actual, ci_preds)),
                 "r2":    float(r2_score(ci_actual, ci_preds)),
-                "n_laps": int(mask.sum()),
+                "n_laps": float(mask.sum()),  # type: ignore
             }
         # Log worst circuits first — these need attention
-        worst = sorted(per_circuit.items(), key=lambda x: x[1]["rmse"], reverse=True)
-        for circuit, m in worst[:5]:
+        worst: list[tuple[str, dict[str, float]]] = sorted(per_circuit.items(), key=lambda x: x[1]["rmse"], reverse=True)
+        import itertools
+        for circuit, m in itertools.islice(worst, 5):
             log.info(
                 f"  {circuit:<20} | RMSE: {m['rmse']:.4f}s "
                 f"| MAE: {m['mae']:.4f}s "
@@ -548,9 +549,10 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
 
     # Feature importance — top 10
     log.info("\nFEATURE IMPORTANCE (top 10 by gain)")
-    importance = model.get_booster().get_score(importance_type="gain")
-    importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
-    for feat, score in importance[:10]:
+    feature_importance: dict[str, float] = model.get_booster().get_score(importance_type="gain")
+    importance_list: list[tuple[str, float]] = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+    import itertools
+    for feat, score in itertools.islice(importance_list, 10):
         log.info(f"  {feat:<30} {score:.2f}")
     log.info("─" * 50)
 
@@ -561,7 +563,7 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
         "per_era":      per_era,
         "per_circuit":  per_circuit,
         "best_iteration": model.best_iteration,
-        "feature_importance": dict(importance),
+        "feature_importance": dict(importance_list),
         "train_years_end":   cfg.TRAIN_YEARS_END,
         "test_years_start":  cfg.TEST_YEARS_START,
         "feature_cols":      cfg.FEATURE_COLS,
@@ -569,8 +571,8 @@ def evaluate(model: xgb.XGBRegressor, X_train, X_test, y_train, y_test,
         "dataset_stats": {
             "train_laps": int(len(X_train)),
             "test_laps":  int(len(y_test)),
-            "train_rmse": train_rmse,
-            "overfit_ratio": round(overfit_ratio, 3),
+            "train_rmse": float(train_rmse),
+            "overfit_ratio": float(round(float(overfit_ratio), 3)),  # type: ignore
         },
     }
 
