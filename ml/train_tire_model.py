@@ -74,16 +74,16 @@ class TrainConfig:
         "objective":        "reg:squarederror",
         "eval_metric":      "rmse",
         "n_estimators":     1000,
-        "learning_rate":    0.05,       # low LR + high n_estimators = better generalization
-        "max_depth":        6,          # deep enough for compound×temp interactions
-        "min_child_weight": 10,         # prevents overfitting on small stints
-        "subsample":        0.8,        # row sampling per tree
-        "colsample_bytree": 0.8,        # feature sampling per tree
-        "gamma":            0.1,        # min loss reduction to split — regularization
-        "reg_alpha":        0.1,        # L1 regularization
-        "reg_lambda":       1.0,        # L2 regularization
-        "early_stopping_rounds": 50,    # stop if val RMSE doesn't improve for 50 rounds
-        "tree_method":      "hist",     # fastest CPU training method
+        "learning_rate":    0.03,       # lowered LR for smoother learning curves
+        "max_depth":        4,          # reduced depth to prevent overfitting
+        "min_child_weight": 20,         # increased to prevent splitting on small stints
+        "subsample":        0.7,        # more aggressive row sampling
+        "colsample_bytree": 0.7,        # more aggressive feature sampling
+        "gamma":            0.5,        # increased min loss reduction
+        "reg_alpha":        2.0,        # increased L1 regularization
+        "reg_lambda":       5.0,        # increased L2 regularization
+        "early_stopping_rounds": 50,
+        "tree_method":      "hist",
         "random_state":     42,
         "n_jobs":           -1,
     })
@@ -276,8 +276,7 @@ def train(X_train, y_train, X_test, y_test, cfg: TrainConfig,
     log.info("Training XGBoost tire degradation model...")
 
     # Copy params to avoid mutating the config
-    params = {k: v for k, v in cfg.XGB_PARAMS.items() if k != "early_stopping_rounds"}
-    early_stopping_rounds = cfg.XGB_PARAMS.get("early_stopping_rounds", 50)
+    params: dict = dict(cfg.XGB_PARAMS)
 
     # Carve a validation set from the tail of training data (temporal ordering).
     # 80/20 split preserves chronological order — the model trains on earlier
@@ -304,7 +303,6 @@ def train(X_train, y_train, X_test, y_test, cfg: TrainConfig,
         X_fit, y_fit,
         eval_set=eval_sets,
         verbose=verbose,
-        early_stopping_rounds=early_stopping_rounds,
     )
 
     log.info(f"Training complete. Best iteration: {model.best_iteration}")
@@ -356,14 +354,12 @@ def walk_forward_cv(df: pd.DataFrame, cfg: TrainConfig) -> list[dict]:
         X_te = fold_test[cfg.FEATURE_COLS]
         y_te = fold_test[cfg.TARGET_COL]
 
-        params = {k: v for k, v in cfg.XGB_PARAMS.items() if k != "early_stopping_rounds"}
-        early_stopping_rounds = cfg.XGB_PARAMS.get("early_stopping_rounds", 50)
+        params: dict = dict(cfg.XGB_PARAMS)
         model = xgb.XGBRegressor(**params)
         model.fit(
             X_tr, y_tr,
             eval_set=[(X_te, y_te)],
             verbose=0,
-            early_stopping_rounds=early_stopping_rounds,
         )
 
         preds = model.predict(X_te)

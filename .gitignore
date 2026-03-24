@@ -19,3 +19,11 @@ node_modules/
 Thumbs.db
 
 cache/
+
+# ML Data & Output
+ml/fastf1_cache/
+ml/models/
+ml/scittse_tire_dataset.parquet
+
+# Pyre configuration
+.pyre_configuration

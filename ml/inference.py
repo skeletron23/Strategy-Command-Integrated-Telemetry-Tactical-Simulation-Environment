@@ -102,17 +102,22 @@ class TireDegradationInferenceService:
 		log.info("Model config path: %s", config_path.resolve())
 
 	def _infer_era_encoded(self, request: TireDegradationRequest) -> int:
-		if request.era_encoded is not None:
-			return int(request.era_encoded)
-		if request.year is not None:
-			return int(request.year >= 2022)
+		era_encoded = request.era_encoded
+		if era_encoded is not None:
+			return int(era_encoded)
+		year = request.year
+		if year is not None:
+			return 1 if year >= 2022 else 0
 		return 1
 
 	def _infer_session_progress(self, lap_number: int, request: TireDegradationRequest) -> float:
-		if request.total_race_laps:
-			return min(1.0, lap_number / request.total_race_laps)
-		if request.session_progress_pct is not None:
-			return float(request.session_progress_pct)
+		total_race_laps = request.total_race_laps
+		if total_race_laps is not None:
+			if total_race_laps > 0:
+				return min(1.0, lap_number / total_race_laps)
+		session_progress_pct = request.session_progress_pct
+		if session_progress_pct is not None:
+			return float(session_progress_pct)
 		return min(1.0, lap_number / 60.0)
 
 	def _feature_row(self, request: TireDegradationRequest, lap_offset: int) -> dict[str, float]:
@@ -166,13 +171,13 @@ class TireDegradationInferenceService:
 					"lap_offset": offset,
 					"projected_lap_number": request.lap_number + offset,
 					"projected_tyre_life": request.tyre_life + offset,
-					"predicted_lap_time_s": round(float(predicted_lap_time), 3),
+					"predicted_lap_time_s": float(round(float(predicted_lap_time), 3)),
 				}
 			)
 
-		first_lap = points[0]["predicted_lap_time_s"]
-		final_lap = points[-1]["predicted_lap_time_s"]
-		curve_delta = round(float(final_lap - first_lap), 3)
+		first_lap: float = points[0]["predicted_lap_time_s"]
+		final_lap: float = points[-1]["predicted_lap_time_s"]
+		curve_delta: float = float(round(final_lap - first_lap, 3))
 
 		return {
 			"request": request.model_dump(),
