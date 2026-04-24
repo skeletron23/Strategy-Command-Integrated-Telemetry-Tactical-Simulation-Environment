@@ -47,15 +47,15 @@ This system relies on a decoupled, asynchronous pipeline optimized for standard 
 ```text
 f1-strategy-agent/
 ├── backend/                  # FastAPI Gateway & Ingest Worker
-│   ├── ingest.py             # fastf1 data fetcher & MsgPack packer
-│   └── api.py                # WebSocket Broadcaster
+│   ├── ingestion.py          # fastf1 data fetcher & MsgPack packer
+│   └── main.py               # WebSocket Broadcaster
 ├── frontend/                 # React/Vite Application
 │   ├── src/hooks/            # useTelemetry (Binary WebSocket Decoder)
 │   └── src/components/       # Canvas TrackMap & Strategy Chat
-├── ai-worker/                # Strategy & Machine Learning Node
-│   ├── agent.py              # Groq Tool-Calling Logic
-│   ├── tools.py              # Math & Redis querying tools
-│   ├── knowledge_base.py     # ChromaDB Rulebook integration
+├── ml/                       # Machine Learning Node
+│   ├── inference.py          # ML Inference Service (FastAPI)
+│   ├── train_tire_model.py   # Model training script
+│   ├── dataset_builder.py    # Data preparation
 │   └── models/               # XGBoost tire degradation predictors
 ├── docker-compose.yml        # Infrastructure (Redis)
 └── README.md
@@ -77,19 +77,48 @@ f1-strategy-agent/
 docker-compose up -d
 ```
 
-### 2. Backend & AI Worker Setup
+### 2. Environment Setup
 
 ```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
+# Create and activate virtual environment (in project root)
+python -m venv venv
+# On Windows: venv\Scripts\activate
+# On Unix: source venv/bin/activate
 pip install -r requirements.txt
-
-# Start the Gateway
-uvicorn api:app --reload --port 8000
 ```
 
-### 3. Frontend Setup
+### 3. Start the Inference Service (ML)
+
+```bash
+cd ml
+python inference.py
+```
+
+### 4. Start the Backend Gateway
+
+You can use the provided batch file on Windows:
+```bash
+.\run_backend.bat
+```
+Or start it manually:
+```bash
+cd backend
+uvicorn main:app --reload --port 8000
+```
+
+### 5. Start Data Ingestion
+
+To stream historical session data into Redis:
+```bash
+# On Windows using the batch file (Year Track Session Driver)
+.\run_ingestion.bat 2023 Zandvoort R VER
+```
+Or start it manually:
+```bash
+python backend/ingestion.py --year 2023 --track Zandvoort --session R --driver VER
+```
+
+### 6. Frontend Setup
 
 ```bash
 cd frontend
