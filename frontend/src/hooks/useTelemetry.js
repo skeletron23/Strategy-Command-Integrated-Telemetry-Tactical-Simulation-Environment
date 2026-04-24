@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const WS_URL = 'ws://127.0.0.1:8000/ws/telemetry';
 const RECONNECT_MS = 3000;
@@ -128,10 +128,16 @@ function generateDemoFrame(tick) {
 }
 
 export default function useTelemetry() {
-  const [telemetry, setTelemetry] = useState(null);
-  const [trackPath, setTrackPath] = useState([]);
+  // ── High-frequency data → refs (no re-renders) ──
+  const telemetryRef = useRef(null);
+  const trackPathRef = useRef([]);
+
+  // ── Low-frequency data → state (re-render only at lap boundaries / connection changes) ──
   const [connected, setConnected] = useState(false);
   const [lapTimes, setLapTimes] = useState([]);
+  const [lap, setLap] = useState(null);
+
+  // ── Internal refs — never exposed, never in dependency arrays ──
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const demoTimer = useRef(null);
@@ -139,88 +145,110 @@ export default function useTelemetry() {
   const currentLap = useRef(0);
   const lapStart = useRef(Date.now());
 
-  const clearDemo = useCallback(() => {
-    if (demoTimer.current) {
-      clearInterval(demoTimer.current);
-      demoTimer.current = null;
-    }
-  }, []);
-
-  const processFrame = useCallback((data) => {
-    setTelemetry(data);
-    setTrackPath((prev) => {
-      const next = [...prev, { x: data.x, y: data.y }];
-      return next.length > TRACK_PATH_MAX ? next.slice(-TRACK_PATH_MAX) : next;
-    });
-
-    if (data.lap !== currentLap.current && currentLap.current !== 0) {
-      const now = Date.now();
-      const lapTime = ((now - lapStart.current) / 1000).toFixed(3);
-      setLapTimes((prev) => {
-        const base = 90 + Math.random() * 3;
-        const time = currentLap.current === 1 ? parseFloat(lapTime) : parseFloat(base.toFixed(3));
-        const newTimes = [...prev, { lap: currentLap.current, time }];
-        return newTimes.slice(-30);
-      });
-      lapStart.current = now;
-    }
-    if (data.lap !== currentLap.current) {
-      currentLap.current = data.lap;
-      lapStart.current = Date.now();
-    }
-  }, []);
-
-  const startDemo = useCallback(() => {
-    clearDemo();
-    demoTick.current = 0;
-    demoTimer.current = setInterval(() => {
-      const frame = generateDemoFrame(demoTick.current++);
-      processFrame(frame);
-    }, 50); // 20 Hz demo
-  }, [clearDemo, processFrame]);
-
-  const connect = useCallback(() => {
-    try {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        clearDemo();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          processFrame(data);
-        } catch { /* ignore parse errors */ }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
-        startDemo();
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
-    } catch {
-      setConnected(false);
-      startDemo();
-      reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
-    }
-  }, [clearDemo, startDemo, processFrame]);
-
+  // ✅ Single effect with EMPTY deps — runs once, WS lives for the full session
   useEffect(() => {
+    // ── Helper: process a single telemetry frame ──
+    function processFrame(data) {
+      // Write directly to refs — zero React re-renders
+      telemetryRef.current = data;
+
+      // ✅ Push to the SAME array reference — never reassign trackPathRef.current
+      const path = trackPathRef.current;
+      path.push({ x: data.x, y: data.y });
+      if (path.length > TRACK_PATH_MAX) {
+        path.splice(0, path.length - TRACK_PATH_MAX);
+      }
+
+      // Lap boundary detection — only fires setState ~once per 90s
+      if (data.lap !== currentLap.current && currentLap.current !== 0) {
+        const now = Date.now();
+        const lapTime = ((now - lapStart.current) / 1000).toFixed(3);
+        setLapTimes((prev) => {
+          const base = 90 + Math.random() * 3;
+          const time = currentLap.current === 1 ? parseFloat(lapTime) : parseFloat(base.toFixed(3));
+          const newTimes = [...prev, { lap: currentLap.current, time }];
+          return newTimes.slice(-30);
+        });
+        lapStart.current = now;
+      }
+      if (data.lap !== currentLap.current) {
+        currentLap.current = data.lap;
+        lapStart.current = Date.now();
+        // Low-frequency state update for StatusBar / useInference
+        setLap(data.lap);
+      }
+    }
+
+    // ── Helper: stop demo mode ──
+    function clearDemo() {
+      if (demoTimer.current) {
+        clearInterval(demoTimer.current);
+        demoTimer.current = null;
+      }
+    }
+
+    // ── Helper: start demo mode (idempotent — safe to call repeatedly) ──
+    function ensureDemo() {
+      // ✅ If demo is already running, do nothing — no tick reset, no interval churn
+      if (demoTimer.current) return;
+
+      // ✅ Never reset demoTick — car continues where it was
+      demoTimer.current = setInterval(() => {
+        const frame = generateDemoFrame(demoTick.current++);
+        processFrame(frame);
+      }, 50); // 20 Hz demo
+    }
+
+    // ── Helper: connect to WebSocket with auto-reconnect ──
+    function connect() {
+      // ✅ Cancel any pending reconnect to prevent overlapping attempts
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+
+      try {
+        const ws = new WebSocket(WS_URL);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setConnected(true);
+          clearDemo(); // Stop demo only when live WS is available
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            processFrame(data);
+          } catch { /* ignore parse errors */ }
+        };
+
+        ws.onclose = () => {
+          setConnected(false);
+          ensureDemo(); // ✅ Idempotent — won't restart if already running
+          reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
+        };
+
+        ws.onerror = () => {
+          ws.close();
+        };
+      } catch {
+        setConnected(false);
+        ensureDemo();
+        reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
+      }
+    }
+
+    // ── Kick off connection ──
     connect();
 
+    // ── Cleanup: runs only on unmount ──
     return () => {
       clearDemo();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [connect]);
+  }, []); // ✅ Empty deps = runs once, WS lives for full session
 
-  return { telemetry, trackPath, connected, lapTimes };
+  return { telemetryRef, trackPathRef, connected, lapTimes, lap };
 }

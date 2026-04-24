@@ -8,20 +8,20 @@ import StintProjection from './components/StintProjection';
 import LapTimingTable from './components/LapTimingTable';
 
 export default function App() {
-  const { telemetry, trackPath, connected: telemetryConnected, lapTimes } = useTelemetry();
-  const { prediction, connected: inferenceConnected } = useInference(telemetry?.lap);
+  const { telemetryRef, trackPathRef, connected: telemetryConnected, lapTimes, lap } = useTelemetry();
+  const { prediction, connected: inferenceConnected } = useInference(lap);
 
   return (
     <div className="dashboard">
       <StatusBar
         telemetryConnected={telemetryConnected}
         inferenceConnected={inferenceConnected}
-        lap={telemetry?.lap}
+        lap={lap}
       />
 
-      <TelemetryPanel telemetry={telemetry} />
+      <TelemetryPanel telemetryRef={telemetryRef} />
 
-      <TrackMap trackPath={trackPath} telemetry={telemetry} />
+      <TrackMap trackPathRef={trackPathRef} telemetryRef={telemetryRef} />
 
       <div className="strategy-panel">
         <StintProjection prediction={prediction} />

@@ -1,119 +1,128 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect } from 'react';
 
-export default function TrackMap({ trackPath, telemetry }) {
+export default function TrackMap({ trackPathRef, telemetryRef }) {
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
+  const rafRef = useRef(null);
+  const locationRef = useRef(null);
 
-  const draw = useCallback(() => {
+  useEffect(() => {
     const canvas = canvasRef.current;
     const wrapper = wrapperRef.current;
     if (!canvas || !wrapper) return;
 
     const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const w = wrapper.clientWidth;
-    const h = wrapper.clientHeight;
 
-    if (w === 0 || h === 0) return;
+    // ── Fix 1 & 2: ResizeObserver keeps canvas sized to container ──
+    let cssW = 0;
+    let cssH = 0;
 
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      cssW = wrapper.clientWidth;
+      cssH = wrapper.clientHeight;
+      if (cssW === 0 || cssH === 0) return;
 
-    ctx.clearRect(0, 0, w, h);
+      // Set the backing store to match physical pixels (sharp on HiDPI)
+      canvas.width = cssW * dpr;
+      canvas.height = cssH * dpr;
 
-    if (!trackPath || trackPath.length === 0) {
-      ctx.fillStyle = '#484f58';
-      ctx.font = '14px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('AWAITING TRACK DATA…', w / 2, h / 2);
-      return;
+      // Reset transform so all drawing uses CSS-pixel coordinates
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // ── Aspect-ratio-safe mapping ──
-    const PADDING = 50;
-    const usableW = w - PADDING * 2;
-    const usableH = h - PADDING * 2;
-    const maxDraw = Math.min(usableW, usableH);
-    const offsetX = (w - maxDraw) / 2;
-    const offsetY = (h - maxDraw) / 2;
+    resizeCanvas();
 
-    const toScreen = (pt) => ({
-      x: offsetX + pt.x * maxDraw,
-      y: offsetY + (1.0 - pt.y) * maxDraw,
-    });
+    const ro = new ResizeObserver(() => resizeCanvas());
+    ro.observe(wrapper);
 
-    // ── Draw track outline (wide, dark base) ──
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-    ctx.lineWidth = 10;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    const first = toScreen(trackPath[0]);
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < trackPath.length; i++) {
-      const p = toScreen(trackPath[i]);
-      ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
+    // ── Fix 3: Persistent rAF draw loop reads refs every frame ──
+    function draw() {
+      // Guard against zero-size canvas (e.g. hidden tab)
+      if (cssW === 0 || cssH === 0) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
 
-    // ── Bright racing-line overlay for recent ~300 points ──
-    const recentStart = Math.max(0, trackPath.length - 300);
-    for (let i = recentStart + 1; i < trackPath.length; i++) {
-      const prev = toScreen(trackPath[i - 1]);
-      const curr = toScreen(trackPath[i]);
-      const progress = (i - recentStart) / (trackPath.length - recentStart);
+      ctx.clearRect(0, 0, cssW, cssH);
 
+      // Read latest data from refs — no React dependency
+      const trackPath = trackPathRef.current;
+      const telemetry = telemetryRef.current;
+
+      if (!trackPath || trackPath.length === 0) {
+        ctx.fillStyle = '#484f58';
+        ctx.font = '14px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('AWAITING TRACK DATA…', cssW / 2, cssH / 2);
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+
+      // ── Aspect-ratio-safe mapping (identical to HTML version) ──
+      const PADDING = 30;
+      const usableWidth = cssW - PADDING * 2;
+      const usableHeight = cssH - PADDING * 2;
+      const maxDrawArea = Math.min(usableWidth, usableHeight);
+      const offsetX = (cssW - maxDrawArea) / 2;
+      const offsetY = (cssH - maxDrawArea) / 2;
+
+      // Convert normalized 0–1 coordinates to screen pixels
+      const toScreen = (pt) => ({
+        x: offsetX + pt.x * maxDrawArea,
+        y: offsetY + (1.0 - pt.y) * maxDrawArea,
+      });
+
+      // ── Draw the permanent static track (dark gray line) ──
       ctx.beginPath();
-      ctx.moveTo(prev.x, prev.y);
-      ctx.lineTo(curr.x, curr.y);
-      ctx.strokeStyle = getSpeedColor(progress);
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 6;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const first = toScreen(trackPath[0]);
+      ctx.moveTo(first.x, first.y);
+
+      for (let i = 1; i < trackPath.length; i++) {
+        const p = toScreen(trackPath[i]);
+        ctx.lineTo(p.x, p.y);
+      }
       ctx.stroke();
+
+      // ── Draw car position ──
+      if (telemetry) {
+        const carPos = toScreen({ x: telemetry.x, y: telemetry.y });
+
+        // Draw glow around the car
+        ctx.beginPath();
+        ctx.arc(carPos.x, carPos.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.fill();
+
+        // Draw the car dot (bright red)
+        ctx.beginPath();
+        ctx.arc(carPos.x, carPos.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff0000';
+        ctx.fill();
+      }
+
+      // Update location label via DOM (cheaper than re-render)
+      if (locationRef.current) {
+        const turn = telemetry?.turn;
+        const text = turn == null ? '—' : turn === 'Straight' ? 'Straight' : `Turn ${turn}`;
+        locationRef.current.textContent = text;
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
     }
 
-    // ── Car position ──
-    if (telemetry) {
-      const carPos = toScreen({ x: telemetry.x, y: telemetry.y });
+    rafRef.current = requestAnimationFrame(draw);
 
-      // Outer glow
-      const glowGrad = ctx.createRadialGradient(carPos.x, carPos.y, 0, carPos.x, carPos.y, 28);
-      glowGrad.addColorStop(0, 'rgba(225, 6, 0, 0.6)');
-      glowGrad.addColorStop(0.4, 'rgba(225, 6, 0, 0.15)');
-      glowGrad.addColorStop(1, 'rgba(225, 6, 0, 0)');
-      ctx.beginPath();
-      ctx.arc(carPos.x, carPos.y, 28, 0, Math.PI * 2);
-      ctx.fillStyle = glowGrad;
-      ctx.fill();
-
-      // Car dot
-      ctx.beginPath();
-      ctx.arc(carPos.x, carPos.y, 7, 0, Math.PI * 2);
-      ctx.fillStyle = '#e10600';
-      ctx.fill();
-
-      // Inner white core
-      ctx.beginPath();
-      ctx.arc(carPos.x, carPos.y, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-    }
-  }, [trackPath, telemetry]);
-
-  useEffect(() => {
-    const id = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(id);
-  }, [draw]);
-
-  useEffect(() => {
-    const onResize = () => draw();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [draw]);
-
-  const turn = telemetry?.turn;
-  const location = turn == null ? '—' : turn === 'Straight' ? 'Straight' : `Turn ${turn}`;
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+    };
+  }, []); // Empty deps — refs are stable, loop runs for component lifetime
 
   return (
     <div className="track-map-panel">
@@ -121,22 +130,7 @@ export default function TrackMap({ trackPath, telemetry }) {
       <div className="track-map-canvas-wrapper" ref={wrapperRef}>
         <canvas ref={canvasRef} />
       </div>
-      <span className="track-map-panel__location">{location}</span>
+      <span className="track-map-panel__location" ref={locationRef}>—</span>
     </div>
   );
-}
-
-function getSpeedColor(progress) {
-  if (progress < 0.3) {
-    return `rgba(0, 100, 180, ${0.15 + progress * 0.5})`;
-  } else if (progress < 0.7) {
-    const t = (progress - 0.3) / 0.4;
-    const r = Math.round(t * 225);
-    const g = Math.round(212 - t * 200);
-    const b = Math.round(255 - t * 255);
-    return `rgba(${r}, ${g}, ${b}, ${0.5 + progress * 0.3})`;
-  } else {
-    const t = (progress - 0.7) / 0.3;
-    return `rgba(225, ${Math.round(6 + (1 - t) * 80)}, ${Math.round(t * 20)}, ${0.7 + t * 0.3})`;
-  }
 }

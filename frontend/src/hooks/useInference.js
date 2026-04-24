@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const WS_URL = 'ws://127.0.0.1:8001/ws/predict/tire-degradation';
 const RECONNECT_MS = 5000;
@@ -28,94 +28,104 @@ function generateDemoProjection() {
 export default function useInference(currentLap = 1) {
   const [prediction, setPrediction] = useState(null);
   const [connected, setConnected] = useState(false);
+
+  // ── Internal refs — track mutable state without triggering re-renders ──
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const sendTimer = useRef(null);
   const demoTimer = useRef(null);
   const lapRef = useRef(currentLap);
 
+  // Keep lapRef in sync — this effect is cheap and doesn't touch WS
   useEffect(() => { lapRef.current = currentLap; }, [currentLap]);
 
-  const clearDemo = useCallback(() => {
-    if (demoTimer.current) {
-      clearInterval(demoTimer.current);
-      demoTimer.current = null;
-    }
-  }, []);
-
-  const startDemo = useCallback(() => {
-    clearDemo();
-    demoTimer.current = setInterval(() => {
-      setPrediction(generateDemoProjection());
-    }, 2000);
-    setPrediction(generateDemoProjection());
-  }, [clearDemo]);
-
-  const connect = useCallback(() => {
-    try {
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        clearDemo();
-
-        // Send periodic inference requests
-        sendTimer.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const payload = {
-              tyre_life: Math.max(1, lapRef.current),
-              compound: 'MEDIUM',
-              lap_number: Math.max(1, lapRef.current),
-              stint_laps_ahead: 6,
-              circuit: 'Great Britain',
-              fresh_tyre: 0,
-              track_temp: 32.0,
-              air_temp: 24.0,
-              humidity: 45.0,
-              pressure: 1013.0,
-              wind_speed: 3.0,
-              total_race_laps: 52,
-              year: 2024,
-            };
-            ws.send(JSON.stringify(payload));
-          }
-        }, SEND_INTERVAL_MS);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const result = JSON.parse(event.data);
-          if (result && result.projection && result.projection.length > 0) {
-            setPrediction(result);
-          }
-        } catch { /* ignore */ }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (sendTimer.current) clearInterval(sendTimer.current);
-        reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
-        startDemo();
-      };
-
-      ws.onerror = () => { ws.close(); };
-    } catch {
-      setConnected(false);
-      startDemo();
-      reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
-    }
-  }, [clearDemo, startDemo]);
-
+  // ✅ Single effect with EMPTY deps — WS connects once and lives for the full session
   useEffect(() => {
+    function clearDemo() {
+      if (demoTimer.current) {
+        clearInterval(demoTimer.current);
+        demoTimer.current = null;
+      }
+    }
+
+    function ensureDemo() {
+      if (demoTimer.current) return;
+      demoTimer.current = setInterval(() => {
+        setPrediction(generateDemoProjection());
+      }, 2000);
+      setPrediction(generateDemoProjection());
+    }
+
+    function connect() {
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+
+      try {
+        const ws = new WebSocket(WS_URL);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setConnected(true);
+          clearDemo();
+
+          // Send periodic inference requests
+          sendTimer.current = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              const payload = {
+                tyre_life: Math.max(1, lapRef.current),
+                compound: 'MEDIUM',
+                lap_number: Math.max(1, lapRef.current),
+                stint_laps_ahead: 6,
+                circuit: 'Great Britain',
+                fresh_tyre: 0,
+                track_temp: 32.0,
+                air_temp: 24.0,
+                humidity: 45.0,
+                pressure: 1013.0,
+                wind_speed: 3.0,
+                total_race_laps: 52,
+                year: 2024,
+              };
+              ws.send(JSON.stringify(payload));
+            }
+          }, SEND_INTERVAL_MS);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const result = JSON.parse(event.data);
+            if (result && result.projection && result.projection.length > 0) {
+              setPrediction(result);
+            }
+          } catch { /* ignore */ }
+        };
+
+        ws.onclose = () => {
+          setConnected(false);
+          if (sendTimer.current) clearInterval(sendTimer.current);
+          ensureDemo();
+          reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
+        };
+
+        ws.onerror = () => { ws.close(); };
+      } catch {
+        setConnected(false);
+        ensureDemo();
+        reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
+      }
+    }
+
     connect();
+
     return () => {
       clearDemo();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (sendTimer.current) clearInterval(sendTimer.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [connect]);
+  }, []); // ✅ Empty deps = runs once
 
   return { prediction, connected };
 }
