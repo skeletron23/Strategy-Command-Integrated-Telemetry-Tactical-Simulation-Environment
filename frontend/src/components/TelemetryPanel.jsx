@@ -16,42 +16,97 @@ const COLORS = {
 
 const FONT_MONO = '"JetBrains Mono", "Fira Code", monospace';
 
+// ── Smooth interpolation factor (higher = snappier, lower = smoother) ──
+const LERP_SPEED = 12; // units per second — gives ~3-frame smooth catch-up at 60fps
+
+function lerp(current, target, dt) {
+  const t = 1 - Math.exp(-LERP_SPEED * dt);
+  return current + (target - current) * t;
+}
+
 export default function TelemetryPanel({ telemetryRef }) {
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    function draw() {
-      const canvas = canvasRef.current;
-      const wrapper = wrapperRef.current;
-      if (!canvas || !wrapper) {
-        rafRef.current = requestAnimationFrame(draw);
-        return;
-      }
+    const canvas = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
 
+    const ctx = canvas.getContext('2d');
+
+    // ── Sizing: only update when container actually resizes ──
+    let cssW = 0;
+    let cssH = 0;
+
+    function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
-      const w = wrapper.clientWidth;
-      const h = wrapper.clientHeight;
+      cssW = wrapper.clientWidth;
+      cssH = wrapper.clientHeight;
+      if (cssW === 0 || cssH === 0) return;
+      canvas.width = cssW * dpr;
+      canvas.height = cssH * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
 
-      if (w === 0 || h === 0) {
+    resizeCanvas();
+    const ro = new ResizeObserver(() => resizeCanvas());
+    ro.observe(wrapper);
+
+    // ── Smoothed display values (interpolated towards target) ──
+    const display = {
+      speed: 0,
+      rpm: 0,
+      gear: 0,
+      throttle: 0,
+      brake: 0,
+      gForce: 0,
+    };
+
+    let lastTime = performance.now();
+
+    function draw(now) {
+      if (cssW === 0 || cssH === 0) {
         rafRef.current = requestAnimationFrame(draw);
         return;
       }
 
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
+      // ── Delta time for frame-rate-independent interpolation ──
+      const dt = Math.min((now - lastTime) / 1000, 0.1); // cap at 100ms to avoid jumps
+      lastTime = now;
 
+      // ── Read target values from ref ──
       const data = telemetryRef.current;
-      const speed = data?.speed || 0;
-      const rpm = data?.rpm || 0;
-      const gear = data?.gear || 0;
-      const throttle = data?.throttle || 0;
-      const brake = data?.brake || 0;
-      const gForce = data?.g_force || 0;
+      const targetSpeed = data?.speed || 0;
+      const targetRpm = data?.rpm || 0;
+      const targetGear = data?.gear || 0;
+      const targetThrottle = data?.throttle || 0;
+      const targetBrake = data?.brake || 0;
+      const targetGForce = data?.g_force || 0;
+
+      // ── Smoothly interpolate display values ──
+      display.speed = lerp(display.speed, targetSpeed, dt);
+      display.rpm = lerp(display.rpm, targetRpm, dt);
+      display.throttle = lerp(display.throttle, targetThrottle, dt);
+      display.brake = lerp(display.brake, targetBrake, dt);
+      display.gForce = lerp(display.gForce, targetGForce, dt);
+      // Gear snaps — no lerp (discrete value)
+      display.gear = targetGear;
+
+      // ── Rounded values for text rendering ──
+      const speed = Math.round(display.speed);
+      const rpm = Math.round(display.rpm);
+      const gear = display.gear;
+      const throttle = Math.round(display.throttle);
+      const brake = Math.round(display.brake);
+      const gForce = display.gForce;
+
+      // ── Clear and draw ──
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      const w = cssW;
+      const h = cssH;
 
       // ── Layout: vertical stack of cards ──
       const cardPadX = 12;
@@ -73,9 +128,7 @@ export default function TelemetryPanel({ telemetryRef }) {
       const ringCy = y + headerH + cardPadInner + 32;
       const ringR = 28;
       const maxSpeed = 370;
-      const speedPct = Math.min(1, speed / maxSpeed);
-      const circumference = 2 * Math.PI * ringR;
-      const arcLength = circumference * 0.75; // 270°
+      const speedPct = Math.min(1, display.speed / maxSpeed);
 
       let speedColor = COLORS.green;
       if (speedPct > 0.75) speedColor = COLORS.f1Red;
@@ -131,9 +184,9 @@ export default function TelemetryPanel({ telemetryRef }) {
 
       // RPM bar
       const maxRPM = 15000;
-      const rpmPct = Math.min(1, rpm / maxRPM);
-      const barY = y + rpmCardH - cardPadInner - 4;
+      const rpmPct = Math.min(1, display.rpm / maxRPM);
       const barW = cardW - cardPadInner * 2;
+      const barY = y + rpmCardH - cardPadInner - 4;
       drawBar(ctx, cardPadX + cardPadInner, barY, barW, 4, rpmPct,
         rpmPct > 0.85 ? ['#ff8c00', '#e10600'] :
         rpmPct > 0.70 ? ['#00d4ff', '#ff8c00'] :
@@ -196,7 +249,7 @@ export default function TelemetryPanel({ telemetryRef }) {
 
       // Throttle bar
       const tBarY = y + throttleCardH - cardPadInner - 4;
-      drawBar(ctx, cardPadX + cardPadInner, tBarY, barW, 4, throttle / 100, ['#00e676', '#00d4ff']);
+      drawBar(ctx, cardPadX + cardPadInner, tBarY, barW, 4, display.throttle / 100, ['#00e676', '#00d4ff']);
 
       y += throttleCardH + cardGap;
 
@@ -218,7 +271,7 @@ export default function TelemetryPanel({ telemetryRef }) {
 
       // Brake bar
       const bBarY = y + brakeCardH - cardPadInner - 4;
-      drawBar(ctx, cardPadX + cardPadInner, bBarY, barW, 4, brake / 100, ['#ff8c00', '#e10600']);
+      drawBar(ctx, cardPadX + cardPadInner, bBarY, barW, 4, display.brake / 100, ['#ff8c00', '#e10600']);
 
       y += brakeCardH + cardGap;
 
@@ -249,6 +302,7 @@ export default function TelemetryPanel({ telemetryRef }) {
     rafRef.current = requestAnimationFrame(draw);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
     };
   }, []); // Empty deps — telemetryRef is stable
 

@@ -125,3 +125,45 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## ⚡ Quick Bootup (After Initial Setup)
+
+Once you've completed the initial setup above, use these commands to start the system for subsequent runs:
+
+### Terminal 1: Infrastructure
+```bash
+docker-compose up -d
+```
+
+### Terminal 2: ML Inference Service
+```bash
+cd ml
+python inference.py
+```
+
+### Terminal 3: Backend Gateway (Windows)
+```bash
+.\run_backend.bat
+```
+Or manually:
+```bash
+cd backend
+uvicorn main:app --reload --port 8000
+```
+
+### Terminal 4: Frontend (Optional - for development)
+```bash
+cd frontend
+npm run dev
+```
+
+### Terminal 5: Data Ingestion (Windows)
+```bash
+.\run_ingestion.bat 2023 Zandvoort R VER
+```
+Or manually:
+```bash
+python backend/ingestion.py --year 2023 --track Zandvoort --session R --driver VER
+```
+
+> **Note:** Adjust the year, track, session, and driver parameters as needed. Use `--help` for available options.
